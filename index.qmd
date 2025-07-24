@@ -1,0 +1,144 @@
+---
+title: "Riqueza de especies de felidos de Costa Rica"
+author: "Nestor Veas"
+format: html
+editor: visual
+---
+
+# Carga de bibliotecas
+
+```{r}
+#| label: carga-bibliotecas
+#| warning: false
+#| message: false
+
+library(tidyverse)
+library(sf)
+library(tmap)
+```
+
+# Carga de datos
+
+## Cantones
+
+```{r}
+#| label: carga-cantones
+#| warning: false
+#| message: false
+
+cantones <- st_read("cantones-simplificados.gpkg",
+quiet=TRUE)
+
+```
+
+# Lectura de un archivo CSV con registros de presencia de félidos en Costa Rica
+
+```{r}
+#| label: carga-felidos
+#| warning: false
+#| message: false
+
+felidos <- st_read(
+  "https://raw.githubusercontent.com/sigenr/2025-i/refs/heads/main/datos/gbif/felidos.csv",
+  options = c(
+    "X_POSSIBLE_NAMES=decimalLongitude", # columna de longitud decimal
+    "Y_POSSIBLE_NAMES=decimalLatitude"   # columna de latitud decimal
+  ),
+  quiet = TRUE
+)
+
+# Asignar CRS WGS84
+st_crs(felidos) <- 4326
+
+```
+
+#Procesamiento
+
+## Unión espacial de felidos y cantones
+
+```{r}
+#| label: union-felidos-cantones
+#| warning: false
+#| message: false
+
+# Unión espacial de félidos y cantones (solo la columna CÓDIGO_CANTÓN),
+# mediante el predicado st_within().
+# Como resultado, CÓDIGO_CANTÓN se une al conjunto de datos de félidos.
+felidos_union_cantones <- st_join(
+  x = felidos,
+  y = dplyr::select(cantones, CÓDIGO_CANTÓN), # selección de columna CÓDIGO_CANTÓN
+  join = st_within
+)
+
+
+```
+
+## Conteo de la cantidad de especies de felidos en cada canton
+
+```{r}
+#| label: conteo-especies-canton
+#| warning: false
+#| message: false
+
+# Conteo de la cantidad de especies de félidos en cantones
+riqueza_especies_felidos_cantones <-
+  felidos_union_cantones |>
+  st_drop_geometry() |>
+  group_by(CÓDIGO_CANTÓN) |>
+  summarize(riqueza_especies_felidos = n_distinct(species, na.rm = TRUE))
+```
+## Unión no espacial de cantones con el dataframe de riqueza de especies
+
+```{r}
+#| label: union-cantones-riqueza
+#| warning: false
+#| message: false
+
+# Unión (no espacial) de cantones y riqueza de especies
+cantones_union_riqueza <-
+  left_join(
+    x = cantones,
+    y = dplyr::select(riqueza_especies_felidos_cantones, CÓDIGO_CANTÓN, riqueza_especies_felidos),
+    by = "CÓDIGO_CANTÓN"
+  ) |>
+  replace_na(list(riqueza_especies_felidos = 0))
+```
+
+## Mapa
+
+```{r}
+#| label: mapa-riqueza-felidos
+#| warning: false
+#| message: false
+
+# Activar el modo interactivo
+tmap_mode("view")
+
+# Definir el mapa
+mapa_riqueza_felidos_cantones <-
+  tm_view(
+    set_view = c(lon = -84.2, lat = 9.6, zoom = 7)
+  ) +  
+  tm_basemap("OpenStreetMap", "Esri.WorldImagery") +
+  tm_shape(cantones_union_riqueza, name = "Riqueza de especies de félidos") +
+    tm_fill(
+      fill = "riqueza_especies_felidos",
+      fill.scale = tm_scale_intervals(
+      style  = "quantile",
+      values = "Reds"
+    ),
+    fill.legend = tm_legend(title = "Riqueza"),
+    id = "CANTÓN",
+    popup.vars  = c(
+      "Cantón" = "CANTÓN",
+      "Riqueza" = "riqueza_especies_felidos"
+    )
+  ) +
+  tm_borders(col = "black", lwd = 0.5) +
+  tm_scale_bar(position = c("left", "bottom"))
+
+
+# Mostrar el mapa
+mapa_riqueza_felidos_cantones
+```
+
